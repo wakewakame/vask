@@ -1,0 +1,12 @@
+[
+	{"name": "task1"},
+	{"name": "task2", "child": [
+		{"name": "task2_1"},
+		{"name": "task2_2", "child": [
+			{"name": "task2_2_1"},
+			{"name": "task2_2_2"}
+		]}
+	]},
+	{"name": "task3"},
+	{"name": "task4"}
+]
