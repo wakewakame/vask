@@ -1,52 +1,39 @@
-const Project = class {
-  constructor(markdown, title) {
-    this.rootTask = Project.parseMarkdown(markdown, title);
-  }
+"use strict";
 
-  toJSON() {
-    return this.rootTask;
-  }
-
-  toMarkdown() {
-    return this.rootTask.toMarkdown();
-  }
-
-  static parseMarkdown(markdown, title) {
-    const rootTask = new Task(title ?? "root");
-    const taskStack = [rootTask];
-    const re = /^([\t]*)-\s*([0-9]+(\.[0-9]+)?[mh])\s*-\s*([0-9]+(\.[0-9]+)?[mh])\s*,\s*([0-9]+(\.[0-9]+)?[mh])\s*:\s*(.*)$/;
-    let lineNumber = 0;
-    for (let line of markdown.split("\n")) {
-      lineNumber += 1;
-
+const Task = class {
+  // 以下のような markdown をパースする
+  // - 3h-4.5h, 0.5h: task
+  //     - 1h-2h, 0.5h: task1
+  //     - 2h-3.5h, 0h: task2
+  static parseMarkdown(markdown) {
+    const rootTask = new Task("root");
+    const taskStack = [{task: rootTask, indent: -1}];
+    const errs = [];
+    const re = /^([\t ]*)-\s*([0-9]+(\.[0-9]+)?[mh])\s*-\s*([0-9]+(\.[0-9]+)?[mh])\s*,\s*([0-9]+(\.[0-9]+)?[mh])\s*:\s*(.*)$/;
+    markdown.split("\n").forEach((line, lineNumber) => {
       // 行のパース
-      if (line === "") { continue; }
       const match = line.match(re);
       if (match === null) {
-        console.error(`failed to parse at L${lineNumber}: ${line}`);
-        continue;
+        const err = `failed to parse at L${lineNumber + 1}: ${line}`;
+        errs.push(err);
+        return;
       }
       const indent = match[1].length;
-      const [name, expect, actual] = [match[8], `${match[2]}-${match[4]}`, match[6]];
+      const expect = `${match[2]}-${match[4]}`;
+      const actual = match[6];
+      const name = match[8];
+      const task = new Task(name, expect, actual);
 
-      // インデントが減っていれば taskStack を減らす
-      while (indent + 1 < taskStack.length) {
+      // タスクの追加
+      while (indent <= taskStack.slice(-1)[0].indent) {
         taskStack.pop();
       }
-
-      // タスクの作成
-      const task = new Task(name, expect, actual);
-      taskStack[indent].child.push(task)
-
-      // taskStack に追加
-      taskStack.push(task);
-    }
-    return rootTask;
+      taskStack.slice(-1)[0].task.child.push(task)
+      taskStack.push({task, indent});
+    });
+    return [rootTask, errs];
   }
-};
 
-// タスクの作成
-const Task = class {
   constructor(name, expect = "0h-0h", actual = "0h") {
     this.name = name;
     this.child = [];
@@ -54,35 +41,36 @@ const Task = class {
     this.actual = actual;
   }
 
-  toJSON() {
-    return {
-      "name": this.name,
-      "child": this.child,
-      "expect": this.expect,
-      "actual": this.actual
+  toMarkdown() {
+    const format = (task, indent) => {
+      const indentStr = [...Array(indent)].map(() => "    ").join("");
+      return [
+        `${indentStr}- ${task.expect}, ${task.actual}: ${task.name}`,
+        ...task.child.map(t => format(t, indent + 1))
+      ].join("\n");
     };
+    return [...this.child.map(task => format(task, 0))].join("\n");
   }
 
-  toMarkdown() {
-    return [
-      `- ${this.expect}, ${this.actual}: ${this.name}`,
-      ...this.child.map(task =>
-        task.toMarkdown().split("\n").map(line =>
-          line.replace(/^/, " ")
-        ).join("\n")
-      )
-    ].join("\n");
+  // JSON.stringify() 時に呼び出されるメソッド
+  toJSON() {
+    return {
+      name: this.name,
+      child: this.child,
+      expect: this.expect,
+      actual: this.actual
+    };
   }
 };
 
 const getProject = async () => {
   const res = await fetch("./mock/project.md");
   const text = await res.text();
-  return new Project(text, "tmp");
+  return Task.parseMarkdown(text);
 };
 
 const main = async () => {
-  const project = await getProject();
+  const [project, _errs] = await getProject();
   console.log(JSON.stringify(project, null, 2));
   console.log(project.toMarkdown());
 };
